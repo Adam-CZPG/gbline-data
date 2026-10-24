@@ -6,6 +6,10 @@
 name: TV guide
 
 on:
+  # Also when the guide scripts change, so a change is tried on real data right away.
+  push:
+    branches: [main]
+    paths: ['scripts/**', '.github/workflows/epg.yml']
   schedule:
     - cron: '23 1,13 * * *'
   workflow_dispatch:

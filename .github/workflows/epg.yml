@@ -1,0 +1,58 @@
+# Every 12 hours: download TV guides (EPG) with the iptv-org/epg grabber for
+# the channels GBLiNE shows, shrink them to one JSON per country and publish
+# them on the `data` branch, where the app reads them:
+#   https://raw.githubusercontent.com/<owner>/gbline-data/data/epg/<CC>.json
+# This repository is public, so GitHub Actions minutes are free.
+name: TV guide
+
+on:
+  schedule:
+    - cron: '23 1,13 * * *'
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: 'Comma-separated ISO codes (empty = default list)'
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: epg
+  cancel-in-progress: false
+
+jobs:
+  epg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Channels to fetch
+        env:
+          COUNTRIES: ${{ github.event.inputs.countries }}
+        run: node scripts/make-channels.mjs
+      - name: Grabber (iptv-org/epg)
+        run: |
+          git clone --depth 1 https://github.com/iptv-org/epg.git grabber
+          cd grabber && npm ci --no-audit --no-fund
+      - name: Download guides
+        working-directory: grabber
+        # Sites that fail are skipped by the grabber; the run never fails on them.
+        run: npm run grab --- --channels=../channels.xml --output=../guide.xml --days=3 --maxConnections=12 --timeout=20000 || true
+      - name: One file per country
+        run: |
+          test -s guide.xml || { echo "::error::No guide was downloaded"; exit 1; }
+          node scripts/compact.mjs guide.xml out/epg
+          du -sh out/epg/*
+      - name: Publish to the data branch
+        run: |
+          cd out
+          git init -q -b data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "TV guide $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data

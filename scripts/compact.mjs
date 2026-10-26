@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 /**
- * Turns the grabber's guide.xml into one small JSON per country for the
- * GBLiNE app: { generated_at, channels: { "<channel id>": [[startMinute, lengthMinutes, "Title"], …] } }
+ * Turns the grabbers' guide XML files (one per shard) into one small JSON per
+ * country for the GBLiNE app: { generated_at, channels: { "<channel id>": [[startMinute, lengthMinutes, "Title"], …] } }
  * Times are minutes since 1970 (UTC). Only programmes from 3 hours ago to
- * 3 days ahead are kept.
+ * 3 days ahead are kept. A channel grabbed from two sites ("<id>" and the
+ * backup "<id>@GBALT") keeps the list that covers the most programmes.
+ *
+ *   node scripts/compact.mjs <outDir> guide-0.xml guide-1.xml …
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-const [input = 'guide.xml', outDir = 'out/epg'] = process.argv.slice(2);
+const [outDir = 'out/epg', ...inputs] = process.argv.slice(2);
+if (!inputs.length) inputs.push('guide.xml');
 const countries = JSON.parse(await readFile('channel-countries.json', 'utf8'));
-const xml = await readFile(input, 'utf8');
 const now = Date.now();
 const from = now - 3 * 3600e3;
 const to = now + 3 * 86400e3;
@@ -30,29 +33,57 @@ function parseTime(value) {
   return utc - offset * 60e3;
 }
 
-const byCountry = {};
+// "<id>" or "<id>@GBALT" (or an old-style "<id>@<feed>") → programmes, from every input file.
+const bySource = new Map();
 const re = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/g;
-let match;
+for (const input of inputs) {
+  let xml;
+  try {
+    xml = await readFile(input, 'utf8');
+  } catch {
+    console.warn(`skipped ${input} (missing)`);
+    continue;
+  }
+  let match;
+  while ((match = re.exec(xml))) {
+    const attrs = Object.fromEntries([...match[1].matchAll(/(\w+)="([^"]*)"/g)].map((a) => [a[1], a[2]]));
+    const source = decode(attrs.channel || '');
+    if (!countries[source.split('@')[0]]) continue;
+    const start = parseTime(attrs.start);
+    const stop = parseTime(attrs.stop);
+    if (!(stop > from && start < to) || !(stop > start)) continue;
+    const title = decode((/<title[^>]*>([\s\S]*?)<\/title>/.exec(match[2]) || [])[1] || '');
+    if (!title) continue;
+    const list = bySource.get(source) || [];
+    list.push([Math.round(start / 60e3), Math.round((stop - start) / 60e3), title.slice(0, 120)]);
+    bySource.set(source, list);
+  }
+}
+
+// Per channel, the source that covers the most minutes from now on wins.
+const minuteNow = Math.round(now / 60e3);
+const coverage = (list) => list.reduce((sum, [start, length]) => sum + Math.max(0, start + length - Math.max(start, minuteNow)), 0);
+const best = new Map();
+for (const [source, list] of bySource) {
+  const id = source.split('@')[0];
+  const seen = new Set();
+  const clean = list
+    .sort((a, b) => a[0] - b[0])
+    .filter(([start]) => !seen.has(start) && seen.add(start));
+  const current = best.get(id);
+  if (!current || coverage(clean) > coverage(current)) best.set(id, clean);
+}
+
+const byCountry = {};
 let total = 0;
-while ((match = re.exec(xml))) {
-  const attrs = Object.fromEntries([...match[1].matchAll(/(\w+)="([^"]*)"/g)].map((a) => [a[1], a[2]]));
-  const id = decode(attrs.channel || '').split('@')[0];
-  const country = countries[id];
-  if (!country) continue;
-  const start = parseTime(attrs.start);
-  const stop = parseTime(attrs.stop);
-  if (!(stop > from && start < to) || !(stop > start)) continue;
-  const title = decode((/<title[^>]*>([\s\S]*?)<\/title>/.exec(match[2]) || [])[1] || '');
-  if (!title) continue;
-  const list = ((byCountry[country] ||= {})[id] ||= []);
-  list.push([Math.round(start / 60e3), Math.round((stop - start) / 60e3), title.slice(0, 120)]);
-  total += 1;
+for (const [id, list] of best) {
+  (byCountry[countries[id]] ||= {})[id] = list;
+  total += list.length;
 }
 
 await mkdir(outDir, { recursive: true });
 const index = {};
 for (const [country, channels] of Object.entries(byCountry)) {
-  for (const list of Object.values(channels)) list.sort((a, b) => a[0] - b[0]);
   await writeFile(`${outDir}/${country}.json`, JSON.stringify({ generated_at: new Date().toISOString(), channels }));
   index[country] = Object.keys(channels).length;
 }

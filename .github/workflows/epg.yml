@@ -1,8 +1,9 @@
 # Every 12 hours: download TV guides (EPG) with the iptv-org/epg grabber for
-# the channels GBLiNE shows, shrink them to one JSON per country and publish
-# them on the `data` branch, where the app reads them:
+# every channel GBLiNE can show (all countries), shrink them to one JSON per
+# country and publish them on the `data` branch, where the app reads them:
 #   https://raw.githubusercontent.com/<owner>/gbline-data/data/epg/<CC>.json
-# This repository is public, so GitHub Actions minutes are free.
+# The channels are split into shards that are grabbed in parallel, so the
+# whole world fits in one run. This repository is public, so Actions minutes are free.
 name: TV guide
 
 on:
@@ -15,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       countries:
-        description: 'Comma-separated ISO codes (empty = default list)'
+        description: 'Comma-separated ISO codes (empty = all countries)'
         required: false
 
 permissions:
@@ -26,31 +27,89 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  epg:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 15
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Channels to fetch
+      - name: Channels to fetch, split into shards
+        id: plan
         env:
           COUNTRIES: ${{ github.event.inputs.countries }}
-        run: node scripts/make-channels.mjs
+          SHARDS: '12'
+        run: |
+          node scripts/make-channels.mjs
+          echo "shards=$(cat shards/matrix.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: |
+            shards/
+            channel-countries.json
+          retention-days: 2
+
+  grab:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Grabber (iptv-org/epg)
         run: |
           git clone --depth 1 https://github.com/iptv-org/epg.git grabber
           cd grabber && npm ci --no-audit --no-fund
       - name: Download guides
         working-directory: grabber
-        # Sites that fail are skipped by the grabber; the run never fails on them.
-        run: npm run grab --- --channels=../channels.xml --output=../guide.xml --days=3 --maxConnections=12 --timeout=20000 || true
+        # Sites that fail are skipped by the grabber; a shard never fails the run.
+        # The step's own limit leaves time to upload whatever was downloaded.
+        timeout-minutes: 150
+        continue-on-error: true
+        run: npm run grab --- --channels=../shards/channels-${{ matrix.shard }}.xml --output=../guide-${{ matrix.shard }}.xml --days=3 --maxConnections=10 --timeout=20000 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guide-${{ matrix.shard }}
+          path: guide-${{ matrix.shard }}.xml
+          if-no-files-found: ignore
+          retention-days: 2
+
+  publish:
+    needs: grab
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: guide-*
+          merge-multiple: true
+          path: guides
       - name: One file per country
         run: |
-          test -s guide.xml || { echo "::error::No guide was downloaded"; exit 1; }
-          node scripts/compact.mjs guide.xml out/epg
-          du -sh out/epg/*
+          ls guides/*.xml >/dev/null 2>&1 || { echo "::error::No guide was downloaded"; exit 1; }
+          node scripts/compact.mjs out/epg guides/*.xml
+          du -sh out/epg | tail -1
       - name: Publish to the data branch
         run: |
           cd out

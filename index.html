@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src https://javwlswxwrahnkcfwgsd.supabase.co; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" />
+<meta name="referrer" content="no-referrer" />
+<meta name="robots" content="noindex" />
+<title>GBLiNE — add playlist</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0b12; --card:#14141d; --fg:#f3f4f8; --muted:#9a9cb0; --green:#24c26a; --line:#262633; --red:#f87171; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; padding:24px 16px 48px; }
+  main { max-width:480px; margin:0 auto; }
+  .brand { font-weight:900; font-size:26px; letter-spacing:-.02em; margin:0 0 4px; }
+  .brand b { color:var(--green); }
+  h1 { font-size:22px; margin:16px 0 6px; }
+  p { color:var(--muted); margin:0 0 16px; }
+  .code { display:inline-block; font:700 15px ui-monospace,monospace; letter-spacing:.2em; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:4px 10px; color:var(--fg); }
+  .tabs { display:flex; gap:4px; background:var(--card); padding:4px; border-radius:14px; margin:18px 0 14px; }
+  .tabs button { flex:1; border:0; border-radius:10px; padding:11px; font:600 15px inherit; font-family:inherit; color:var(--muted); background:transparent; }
+  .tabs button[aria-pressed="true"] { background:var(--fg); color:var(--bg); }
+  label { display:block; font-size:13px; font-weight:600; color:var(--muted); margin:12px 0 6px; }
+  input { width:100%; font:16px inherit; font-family:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:12px; padding:13px 14px; }
+  input:focus { outline:2px solid var(--green); border-color:transparent; }
+  .submit { width:100%; margin-top:20px; border:0; border-radius:999px; padding:15px; font:700 16px inherit; font-family:inherit; background:var(--green); color:#0b0b12; }
+  .submit:disabled { opacity:.5; }
+  .msg { margin-top:16px; padding:12px 14px; border-radius:12px; font-weight:600; }
+  .ok { background:rgba(36,194,106,.14); color:var(--green); }
+  .err { background:rgba(248,113,113,.14); color:var(--red); }
+  .note { font-size:12px; margin-top:22px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <p class="brand">GBL<b>i</b>NE</p>
+  <section id="nocode" hidden>
+    <h1 data-t="nocode_title"></h1>
+    <p data-t="nocode_desc"></p>
+  </section>
+  <form id="form" hidden novalidate>
+    <h1 data-t="title"></h1>
+    <p><span data-t="for_tv"></span> <span class="code" id="code"></span></p>
+    <div class="tabs" role="group">
+      <button type="button" data-mode="m3u" aria-pressed="true" data-t="m3u"></button>
+      <button type="button" data-mode="xtream" aria-pressed="false" data-t="xtream"></button>
+    </div>
+    <div id="m3u">
+      <label for="url" data-t="url"></label>
+      <input id="url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://…" />
+    </div>
+    <div id="xtream" hidden>
+      <label for="server" data-t="server"></label>
+      <input id="server" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://host:port" />
+      <label for="username" data-t="username"></label>
+      <input id="username" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <label for="password" data-t="password"></label>
+      <input id="password" type="password" autocomplete="off" />
+    </div>
+    <label for="name" data-t="name"></label>
+    <input id="name" maxlength="40" autocomplete="off" />
+    <button class="submit" type="submit" data-t="send"></button>
+    <div id="msg" class="msg" hidden></div>
+    <p class="note" data-t="note"></p>
+  </form>
+</main>
+<script src="pair.js"></script>
+</body>
+</html>
